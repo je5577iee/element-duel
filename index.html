@@ -76,6 +76,9 @@ button:focus-visible{outline:3px solid var(--gold); outline-offset:2px}
 .stat .v small{font-size:11px; font-weight:700; color:var(--soft)}
 .stat.tie{background:var(--gold)}
 .card.pickable .stat{cursor:pointer}
+.card.chooser{box-shadow:0 0 0 4px #fff, 0 8px 18px rgba(0,0,0,.35)}
+.owner{text-align:center; font-weight:900; font-size:14px; margin-bottom:6px; opacity:.75}
+.owner.me{opacity:1; color:var(--gold)}
 .card.pickable .stat:hover{background:#ffe7a3}
 .stat.chosen{background:var(--gold)}
 .stat.win{background:#c4f2d6; box-shadow:inset 0 0 0 2px var(--good)}
@@ -154,9 +157,10 @@ button:focus-visible{outline:3px solid var(--gold); outline-offset:2px}
       </div>
       <button class="btn start" id="startBtn">開始對決！</button>
       <ol class="rules">
-        <li>22 張元素卡平分給兩邊，每回合各出最上面的一張。</li>
-        <li>卡上只有原子序和週期表位置。輪到的人看自己的卡，想想週期表的趨勢，選一個覺得會贏的項目，<b>比較大的贏</b>，贏家拿走兩張卡。</li>
-        <li>贏的人下一回合繼續選。如果兩張卡一個在左上、一個在右下，只看位置判斷不出來，就算<b>平手</b>；平手時兩張卡先放中間，下一回合的贏家一起拿走。</li>
+        <li>22 張元素卡平分給兩邊，每回合各出最上面的一張，<b>兩張卡都翻開</b>。</li>
+        <li>卡上只有原子序和週期表位置。輪到的人看兩個元素的位置，想想週期表的趨勢，選一個<b>自己一定會贏</b>的項目。</li>
+        <li>選對了（你的比較大）就贏走兩張卡；選錯了，兩張卡都給對方。</li>
+        <li>兩邊<b>輪流</b>選。如果兩張卡一個在左上、一個在右下，只看位置判斷不出來，就算<b>平手</b>，兩張卡先放中間，下一回合的贏家一起拿走。</li>
         <li>回合結束時卡比較多的人獲勝；或是一方的卡被收光就結束。</li>
       </ol>
       <div class="home-foot"><button class="btn ghost small" id="soundBtn"></button></div>
@@ -335,7 +339,7 @@ function startGame(){
   const deck = shuffle(E.slice()), half = deck.length/2;
   G = { A:deck.slice(0,half), B:deck.slice(half), pot:[], turn:Math.random()<.5 ? 'A' : 'B', round:0, max:+store.rounds,
         phase:'pick', last:null, used:{}, wins:{A:0,B:0} };
-  if(store.mode==='cpu') G.turn = 'A';
+  if(store.mode==='cpu') G.turn = 'A';   // 跟電腦玩時，你先選
   show('game'); nextRound();
 }
 function renderScore(){
@@ -353,27 +357,29 @@ function nextRound(){
   renderScore();
   const me = G.turn, ca = G.A[0], cb = G.B[0];
   const cls = me==='A' ? 'ta' : 'tb';
+  /* 兩張卡都翻開：輪到的人看兩個元素的位置，選一個自己一定會贏的項目 */
+  $('slotA').innerHTML = ownerHTML('A', me) + cardHTML(ca, { pick: me==='A' && !isCpu('A'), cls: me==='A' ? 'chooser' : '' });
+  $('slotB').innerHTML = ownerHTML('B', me) + cardHTML(cb, { pick: me==='B' && !isCpu('B'), cls: me==='B' ? 'chooser' : '' });
   if(isCpu(me)){
     $('banner').innerHTML = '<span class="'+cls+'">電腦</span>正在想要比哪一項……';
-    $('slotA').innerHTML = backHTML(); $('slotB').innerHTML = cardHTML(cb);
-    setTimeout(function(){ choose(cpuPick(cb)); }, 1100);
+    setTimeout(function(){ choose(cpuPick(cb, ca)); }, 1300);
   }else{
-    $('banner').innerHTML = '輪到 <span class="'+cls+'">'+esc(nameOf(me))+'</span>：選一個你覺得會贏的項目！';
-    $('slotA').innerHTML = me==='A' ? cardHTML(ca, { pick:true }) : backHTML();
-    $('slotB').innerHTML = me==='B' ? cardHTML(cb, { pick:true }) : backHTML();
+    $('banner').innerHTML = '輪到 <span class="'+cls+'">'+esc(nameOf(me))+'</span>：看看兩個元素的位置，選一個你<b>一定會贏</b>的項目！';
     document.querySelectorAll('.card.pickable .stat').forEach(function(b){ b.onclick = function(){ choose(b.dataset.k); }; });
   }
 }
-/* 電腦：選自己這張卡在整副牌裡排名最高的項目，偶爾隨便選 */
-function cpuPick(c){
-  if(Math.random() < 0.2) return STATS[Math.floor(Math.random()*STATS.length)].k;
-  let best = null, bv = -1;
-  STATS.forEach(function(st){
-    const v = c[st.k] === null ? -1 : c[st.k];
-    const rank = E.filter(function(e){ return (e[st.k] === null ? -1 : e[st.k]) < v; }).length / E.length;
-    if(rank > bv){ bv = rank; best = st.k; }
-  });
-  return best;
+function ownerHTML(side, me){
+  return '<div class="owner'+(side===me ? ' me' : '')+'">'+esc(nameOf(side))+'的卡'+(side===me ? (G.phase==='pick' ? '　👈 輪到選' : '　（這回合選的人）') : '')+'</div>';
+}
+/* 電腦：看兩張卡，選一個自己會贏的項目；偶爾會判斷錯 */
+function cpuPick(mine, other){
+  const ks = STATS.map(function(st){ return st.k; });
+  if(Math.random() < 0.2) return ks[Math.floor(Math.random()*ks.length)];
+  const win = ks.filter(function(k){ return !isUnclear(mine, other, k) && val(mine,k) > val(other,k); });
+  if(win.length) return win[Math.floor(Math.random()*win.length)];
+  const tie = ks.filter(function(k){ return isUnclear(mine, other, k); });
+  if(tie.length) return tie[Math.floor(Math.random()*tie.length)];
+  return ks[Math.floor(Math.random()*ks.length)];
 }
 function val(e, k){ return e[k] === null ? -Infinity : e[k]; }
 function choose(k){
@@ -382,9 +388,10 @@ function choose(k){
   const ca = G.A[0], cb = G.B[0], va = val(ca,k), vb = val(cb,k);
   const unclear = isUnclear(ca, cb, k);
   const res = unclear ? 'T' : va > vb ? 'A' : vb > va ? 'B' : 'T';
+  const chooser = G.turn, other = chooser==='A' ? 'B' : 'A';
   G.used[k] = (G.used[k]||0) + 1;
-  $('slotA').innerHTML = cardHTML(ca, { cls:'flip'+(res==='A'?' won':''), res:{ k:k, cls:res==='A'?'win':res==='T'?'tie':'lose' } });
-  $('slotB').innerHTML = cardHTML(cb, { cls:'flip'+(res==='B'?' won':''), res:{ k:k, cls:res==='B'?'win':res==='T'?'tie':'lose' } });
+  $('slotA').innerHTML = ownerHTML('A', G.turn) + cardHTML(ca, { cls:(res==='A'?'won':''), res:{ k:k, cls:res==='A'?'win':res==='T'?'tie':'lose' } });
+  $('slotB').innerHTML = ownerHTML('B', G.turn) + cardHTML(cb, { cls:(res==='B'?'won':''), res:{ k:k, cls:res==='B'?'win':res==='T'?'tie':'lose' } });
   const st = STATS.filter(function(s){ return s.k===k; })[0];
   G.A.shift(); G.B.shift();
   if(res === 'T'){
@@ -392,11 +399,13 @@ function choose(k){
     $('banner').innerHTML = unclear ? '判斷不出來，算平手！兩張卡先放到中間。' : '平手！兩張卡先放到中間。';
   }else{
     const win = G[res]; win.push(ca, cb); win.push.apply(win, G.pot); G.pot = [];
-    G.wins[res]++; G.turn = res;
+    G.wins[res]++;
     const human = store.mode==='pvp' || res==='A';
     (human ? sWin : sLose)();
-    $('banner').innerHTML = '<span class="'+(res==='A'?'ta':'tb')+'">'+esc(nameOf(res))+'</span> 贏了這一回合！';
+    const tag = function(x){ return '<span class="'+(x==='A'?'ta':'tb')+'">'+esc(nameOf(x))+'</span>'; };
+    $('banner').innerHTML = res===chooser ? tag(chooser)+' 選對了，贏走兩張卡！' : tag(chooser)+' 選錯了，這一項是 '+tag(other)+' 比較大，'+tag(other)+' 拿走兩張卡！';
   }
+  G.turn = other;   // 兩邊輪流選
   $('explain').innerHTML = unclear ? unclearHTML(ca, cb, st, va, vb) : explainHTML(ca, cb, st, res);
   renderScore();
   $('nextBtn').textContent = (!G.A.length || !G.B.length || (G.max && G.round >= G.max)) ? '看結果' : '下一回合';
